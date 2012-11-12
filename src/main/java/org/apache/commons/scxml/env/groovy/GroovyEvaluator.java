@@ -16,7 +16,10 @@
  */
 package org.apache.commons.scxml.env.groovy;
 
+import groovy.lang.Binding;
+import groovy.lang.GroovyShell;
 import groovy.util.Eval;
+import groovy.util.GroovyScriptEngine;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -26,6 +29,8 @@ import java.util.regex.Pattern;
 import org.apache.commons.scxml.Context;
 import org.apache.commons.scxml.Evaluator;
 import org.apache.commons.scxml.SCXMLExpressionException;
+import org.apache.commons.scxml.env.jexl.JexlContext;
+import org.codehaus.groovy.jsr223.GroovyScriptEngineFactory;
 import org.w3c.dom.Node;
 
 /**
@@ -78,7 +83,8 @@ public class GroovyEvaluator implements Evaluator, Serializable {
             String evalExpr = inFct.matcher(expr).replaceAll("_builtin.isMember(_ALL_STATES, ");
             evalExpr = dataFct.matcher(evalExpr).
                 replaceAll("_builtin.data(_ALL_NAMESPACES, ");
-            Map values = groovyCtx.getVars();
+            @SuppressWarnings("rawtypes")
+			Map values = groovyCtx.getVars();
             return Eval.me("params", values, evalExpr);
         } catch (Exception e) {
             throw new SCXMLExpressionException("eval('" + expr + "'):"
@@ -94,18 +100,21 @@ public class GroovyEvaluator implements Evaluator, Serializable {
         if (expr == null) {
             return null;
         }
-        GroovyContext groovyCtx = null;
-        if (ctx instanceof GroovyContext) {
-            groovyCtx = (GroovyContext) ctx;
-        } else {
+        if (!(ctx instanceof GroovyContext)) {
             throw new SCXMLExpressionException(ERR_CTX_TYPE);
         }
         try {
+            Binding b = new Binding();
+            
             String evalExpr = inFct.matcher(expr).replaceAll("_builtin.isMember(_ALL_STATES, ");
             evalExpr = dataFct.matcher(evalExpr).
                 replaceAll("_builtin.data(_ALL_NAMESPACES, ");
-            Map values = groovyCtx.getVars();
-            return (Boolean)Eval.me("params", values, evalExpr);
+            Map<String, Object> values = getEffectiveVars((GroovyContext)ctx);
+            for(String key : values.keySet()){
+                b.setVariable(key, values.get(key));
+            }
+            GroovyShell sh = new GroovyShell(b);
+            return (Boolean)sh.evaluate(evalExpr);
         } catch (Exception e) {
             throw new SCXMLExpressionException("eval('" + expr + "'):"
                 + e.getMessage(), e);
@@ -155,5 +164,18 @@ public class GroovyEvaluator implements Evaluator, Serializable {
     public Context newContext(final Context parent) {
         return new GroovyContext(parent);
     }
+    
+    @SuppressWarnings("unchecked")
+	private Map<String, Object> getEffectiveVars(final GroovyContext context){
+    	Map<String, Object> retVal = new HashMap<String, Object>();
+    	
+    	if(context.getParent()!= null){
+    		retVal.putAll(getEffectiveVars((GroovyContext)context.getParent()));
+    	}
+    	retVal.putAll(context.getVars());
+    	
+    	return retVal;
+    }
+
 }
 
